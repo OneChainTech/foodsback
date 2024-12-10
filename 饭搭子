@@ -1,0 +1,233 @@
+产品名称： 饭搭子 
+产品功能： 
+1、首页 获取用户定位 根据定位搜索附近500m以内的餐厅 每次显示3家餐厅列表下拉刷新
+餐厅列表显示 餐厅图片 餐厅名称 餐厅地址 餐厅类型（川菜、日料、快餐等）
+
+2、首页 有个默认头像显示区域 点击可以进入设置页面 可以上传头像 设置个性信息 
+
+3、首页 点击餐厅列表 进入用户匹配页面 页面以此显示 地图、就餐时间、开始匹配按钮 地图上标记下当前餐厅的位置和用户位置（用户头像 男上红色边框 女生绿色边框） 当用户点击开始匹配时 根据当前发起匹配的用户 随机匹配两个用户 显示用户头像（用户头像 男上红色边框 女生绿色边框）在地图上 
+
+3、用户匹配页 用户点击匹配按钮到的其他用户头像 进入与该用户聊天页面 匹配页面有个消息提醒 如果有用户发起聊天 可以通过提醒进入聊天页面 用户之间沟通具体事宜 
+
+开发语言 ios swiftui swift
+后台接口 模拟数据*.json
+
+
+1\获取餐厅列表接口
+
+GET /api/v1/restaurants
+
+请求参数：
+{
+  "latitude": number,    // 当前用户纬度
+  "longitude": number,   // 当前用户经度
+  "radius": number,      // 搜索半径（米），可选，默认3000
+  "page": number,        // 页码，可选，默认1
+  "pageSize": number     // 每页数量，可选，默认20
+}
+
+响应：
+{
+  "code": 0,            // 0表示成功
+  "message": "success",
+  "data": {
+    "total": number,    // 总数
+    "restaurants": [{
+      "id": "string",
+      "name": "string",
+      "address": "string",
+      "location": {
+        "latitude": number,
+        "longitude": number
+      },
+      "categories": ["string"],
+      "rating": number,
+      "averagePrice": number,    // 人均价格
+      "imageUrl": "string",      // 餐厅图片
+      "distance": number         // 距离（米）
+    }]
+  }
+}
+
+2/开始匹配用户接口
+
+POST /api/v1/matching/start
+
+请求参数：
+{
+  "restaurantId": "string",    // 餐厅ID
+  "userId": "string",          // 用户ID
+  "diningTime": "string",      // ISO8601格式的就餐时间
+  "preferences": {             // 匹配偏好，可选
+    "gender": "male/female/any",
+    "ageRange": {
+      "min": number,
+      "max": number
+    }
+  }
+}
+
+响应：
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "matchingId": "string",    // 匹配会话ID
+    "status": "matching",      // 匹配状态：matching/matched/expired
+    "startTime": "string",     // 开始匹配时间
+    "expiresIn": number       // 匹配超时时间（秒）
+  }
+}
+
+3/查询最新匹配用户接口
+
+GET /api/v1/matching/users
+
+请求参数：
+{
+  "restaurantId": "string",   // 餐厅ID
+  "userId": "string",         // 当前用户ID
+  "lastUpdateTime": "string"  // ISO8601格式的最后更新时间，用于增量更新
+}
+
+响应：
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "users": [{
+      "id": "string",
+      "nickname": "string",
+      "avatarUrl": "string",
+      "gender": "male/female",
+      "age": number,
+      "location": {
+        "latitude": number,
+        "longitude": number
+      },
+      "matchStatus": "available/matching/matched",  // 用户匹配状态
+      "diningTime": "string"                        // 期望就餐时间
+    }],
+    "updateTime": "string"    // 本次更新时间，用于下次请求
+  }
+}
+
+4/聊天接口（WebSocket）
+
+WebSocket 连接：
+WS /ws/chat?token={jwt_token}&chatId={chat_id}
+
+消息格式：
+// 发送消息
+{
+  "type": "message",
+  "data": {
+    "chatId": "string",
+    "content": "string",
+    "contentType": "text/image",  // 消息类型
+    "timestamp": "string"         // ISO8601格式时间戳
+  }
+}
+
+// 接收消息
+{
+  "type": "message",
+  "data": {
+    "messageId": "string",
+    "chatId": "string",
+    "senderId": "string",
+    "content": "string",
+    "contentType": "text/image",
+    "timestamp": "string",
+    "status": "sent/delivered/read"
+  }
+}
+
+// 系统消息
+{
+  "type": "system",
+  "data": {
+    "code": number,
+    "message": "string"
+  }
+}
+
+// 在线状态
+{
+  "type": "presence",
+  "data": {
+    "userId": "string",
+    "status": "online/offline",
+    "lastSeen": "string"
+  }
+}
+
+安全性考虑：
+所有接口都需要在 Header 中携带 JWT Token 进行身份验证
+WebSocket 连接通过 URL 参数传递 token 进行认证
+实现请求频率限制防止滥用
+
+错误处理
+
+{
+  "code": number,      // 非0表示错误
+  "message": "string", // 错误信息
+  "details": {}        // 详细错误信息（可选）
+}
+
+错误码
+
+400 - 请求参数错误
+401 - 未授权
+403 - 权限不足
+404 - 资源不存在
+429 - 请求过于频繁
+500 - 服务器内部错误
+
+WebSocket 心跳机制：
+客户端每30秒发送一次心跳包
+服务端60秒内未收到心跳则断开连接
+客户端检测到断开后自动重连
+
+
+======
+启动服务
+npm run dev
+
+获取token
+node src/utils/generateToken.js
+
+# 首先设置 token 变量，方便后续使用
+
+export TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJ0ZXN0LXVzZXItMSIsImVtYWlsIjoidGVzdEBleGFtcGxlLmNvbSIsImlhdCI6MTczMzc5MjUzOCwiZXhwIjoxNzMzODc4OTM4fQ.uorUSshDCaAvh5iHCTd_YUwjXab16zaxWjTmtybsZ5g"
+
+
+服务器ip
+
+# 1. 获取餐厅列表接口
+curl -X GET "http://localhost:8080/api/v1/restaurants?latitude=37.7749&longitude=-122.4194&radius=3000&page=1&pageSize=20" \
+-H "Authorization: Bearer $TOKEN" \
+-H "Content-Type: application/json"
+
+# 2. 开始匹配用户接口
+curl -X POST "http://localhost:8080/api/v1/matching/start" \
+-H "Authorization: Bearer $TOKEN" \
+-H "Content-Type: application/json" \
+-d '{
+  "restaurantId": "rest1",
+  "userId": "user1",
+  "diningTime": "2024-12-09T20:00:00Z",
+  "preferences": {
+    "gender": "any",
+    "ageRange": {
+      "min": 20,
+      "max": 40
+    }
+  }
+}'
+
+# 3. 查询最新匹配用户接口
+curl -X GET "http://localhost:8080/api/v1/matching/users?restaurantId=rest1&userId=user1&lastUpdateTime=2024-12-09T09:00:00Z" \
+-H "Authorization: Bearer $TOKEN" \
+-H "Content-Type: application/json"
+
