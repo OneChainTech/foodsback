@@ -6,6 +6,8 @@ const rateLimit = require('express-rate-limit');
 const WebSocket = require('ws');
 const http = require('http');
 const jwt = require('jsonwebtoken');
+const sequelize = require('./config/database');
+const initializeDatabase = require('./config/init-db');
 
 const app = express();
 const server = http.createServer(app);
@@ -23,8 +25,8 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// JWT Authentication Middleware
-const authenticateToken = (req, res, next) => {
+// Authentication middleware
+function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -50,9 +52,14 @@ const authenticateToken = (req, res, next) => {
 // Routes
 const restaurantsRouter = require('./routes/restaurants');
 const matchingRouter = require('./routes/matching');
+const authRouter = require('./routes/auth');
+const chatRouter = require('./routes/chat');
+const setupWebSocket = require('./websocket/chatHandler');
 
+app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/restaurants', authenticateToken, restaurantsRouter);
 app.use('/api/v1/matching', authenticateToken, matchingRouter);
+app.use('/api/v1/chat', authenticateToken, chatRouter);
 
 // WebSocket connections
 const wsClients = new Map();
@@ -158,6 +165,18 @@ const interval = setInterval(() => {
     ws.ping();
   });
 }, 30000);
+
+setupWebSocket(server);
+
+// 初始化数据库
+sequelize.authenticate()
+    .then(() => {
+        console.log('Database connection has been established successfully.');
+        return initializeDatabase();
+    })
+    .catch(err => {
+        console.error('Unable to connect to the database:', err);
+    });
 
 // Start server
 const PORT = process.env.PORT || 8080;
