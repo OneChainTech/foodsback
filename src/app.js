@@ -56,127 +56,168 @@ app.use('/api/v1/matching', authenticateToken, matchingRouter);
 
 // WebSocket handling
 const wsClients = new Map();
+const { Chat, User } = require('./models');
 
-wss.on('connection', (ws, req) => {
-  // Parse token and chatId from URL
-  const params = new URLSearchParams(req.url.split('?')[1]);
-  const token = params.get('token');
-  const chatId = params.get('chatId');
+wss.on('connection', async (ws, req) => {
+    // Parse token and chatId from URL
+    const params = new URLSearchParams(req.url.split('?')[1]);
+    const token = params.get('token');
+    const chatId = params.get('chatId');
 
-  // Verify token
-  jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key', (err, decoded) => {
-    if (err) {
-      ws.send(JSON.stringify({
-        type: 'system',
-        data: {
-          code: 401,
-          message: 'Invalid token'
+    // Verify token
+    jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key', async (err, decoded) => {
+        if (err) {
+            ws.send(JSON.stringify({
+                type: 'system',
+                data: {
+                    code: 401,
+                    message: 'Invalid token'
+                }
+            }));
+            return ws.close();
         }
-      }));
-      return ws.close();
-    }
 
-    const userId = decoded.userId;
-    wsClients.set(userId, { ws, chatId });
+        const userId = decoded.userId;
+        wsClients.set(userId, { ws, chatId });
 
-    // Set up ping-pong for keepalive
-    ws.isAlive = true;
-    ws.on('pong', () => {
-      ws.isAlive = true;
-    });
+        // Update user's last seen time
+        await User.update(
+            { lastSeen: new Date() },
+            { where: { id: userId } }
+        );
 
-    // Handle messages
-    ws.on('message', (data) => {
-      try {
-        const message = JSON.parse(data);
-        
-        if (message.type === 'message') {
-          // Broadcast message to relevant users
-          const messageId = Date.now().toString();
-          const response = {
-            type: 'message',
-            data: {
-              messageId,
-              chatId: message.data.chatId,
-              senderId: userId,
-              content: message.data.content,
-              contentType: message.data.contentType,
-              timestamp: new Date().toISOString(),
-              status: 'sent'
+        // Set up ping-pong for keepalive
+        ws.isAlive = true;
+        ws.on('pong', () => {
+            ws.isAlive = true;
+        });
+
+        // Handle messages
+        ws.on('message', async (data) => {
+            try {
+                const message = JSON.parse(data);
+                
+                if (message.type === 'message') {
+                    // Save message to database
+                    const chat = await Chat.create({
+                        senderId: userId,
+                        receiverId: message.data.receiverId,
+                        content: message.data.content,
+                        contentType: message.data.contentType,
+                        status: 'sent'
+                    });
+
+                    const response = {
+                        type: 'message',
+                        data: {
+                            messageId: chat.id,
+                            chatId: message.data.chatId,
+                            senderId: userId,
+                            content: message.data.content,
+                            contentType: message.data.contentType,
+                            timestamp: chat.createdAt.toISOString(),
+                            status: chat.status
+                        }
+                    };
+
+                    // Send to sender
+                    ws.send(JSON.stringify(response));
+
+                    // Send to receiver if online
+                    const receiverClient = wsClients.get(message.data.receiverId);
+                    if (receiverClient && receiverClient.ws.readyState === WebSocket.OPEN) {
+                        receiverClient.ws.send(JSON.stringify(response));
+                        
+                        // Update message status to delivered
+                        await chat.update({ status: 'delivered' });
+                        
+                        // Send status update to sender
+                        ws.send(JSON.stringify({
+                            type: 'message',
+                            data: {
+                                ...response.data,
+                                status: 'delivered'
+                            }
+                        }));
+                    }
+                }
+            } catch (error) {
+                console.error('Error handling message:', error);
+                ws.send(JSON.stringify({
+                    type: 'system',
+                    data: {
+                        code: 400,
+                        message: 'Invalid message format'
+                    }
+                }));
             }
-          };
+        });
 
-          // Broadcast to all users in the chat
-          wsClients.forEach((client, clientId) => {
-            if (client.chatId === chatId && client.ws.readyState === WebSocket.OPEN) {
-              client.ws.send(JSON.stringify(response));
-            }
-          });
-        }
-      } catch (error) {
-        ws.send(JSON.stringify({
-          type: 'system',
-          data: {
-            code: 400,
-            message: 'Invalid message format'
-          }
-        }));
-      }
+        // Handle client disconnect
+        ws.on('close', async () => {
+            wsClients.delete(userId);
+            // Update user's last seen time
+            await User.update(
+                { lastSeen: new Date() },
+                { where: { id: userId } }
+            );
+            broadcastPresence(userId, 'offline');
+        });
+
+        // Send initial presence
+        broadcastPresence(userId, 'online');
     });
-
-    // Handle client disconnect
-    ws.on('close', () => {
-      wsClients.delete(userId);
-      broadcastPresence(userId, 'offline');
-    });
-
-    // Send initial presence
-    broadcastPresence(userId, 'online');
-  });
 });
 
 // Broadcast presence updates
-function broadcastPresence(userId, status) {
-  const presenceMessage = {
-    type: 'presence',
-    data: {
-      userId,
-      status,
-      lastSeen: new Date().toISOString()
-    }
-  };
+async function broadcastPresence(userId, status) {
+    try {
+        const user = await User.findByPk(userId);
+        if (!user) return;
 
-  wsClients.forEach((client) => {
-    if (client.ws.readyState === WebSocket.OPEN) {
-      client.ws.send(JSON.stringify(presenceMessage));
+        const presenceMessage = {
+            type: 'presence',
+            data: {
+                userId: user.id,
+                status,
+                lastSeen: user.lastSeen.toISOString()
+            }
+        };
+
+        wsClients.forEach((client) => {
+            if (client.ws.readyState === WebSocket.OPEN) {
+                client.ws.send(JSON.stringify(presenceMessage));
+            }
+        });
+    } catch (error) {
+        console.error('Error broadcasting presence:', error);
     }
-  });
 }
 
 // WebSocket keepalive
 const interval = setInterval(() => {
-  wss.clients.forEach((ws) => {
-    if (!ws.isAlive) return ws.terminate();
-    ws.isAlive = false;
-    ws.ping();
-  });
+    wss.clients.forEach((ws) => {
+        if (!ws.isAlive) return ws.terminate();
+        ws.isAlive = false;
+        ws.ping();
+    });
 }, 30000);
 
 wss.on('close', () => {
-  clearInterval(interval);
+    clearInterval(interval);
 });
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({
-    code: 500,
-    message: 'Internal server error',
-    details: process.env.NODE_ENV === 'development' ? err.message : undefined
-  });
+    console.error(err.stack);
+    res.status(500).json({
+        code: 500,
+        message: 'Internal server error',
+        details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
 });
 
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });
