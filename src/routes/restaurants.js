@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { Restaurant } = require('../models');
-const { Op } = require('sequelize');
+const mockData = require('../mock/data');
 
 // 计算两点之间的距离（米）
 function calculateDistance(lat1, lon1, lat2, lon2) {
@@ -53,34 +52,19 @@ router.get('/', async (req, res) => {
             });
         }
 
-        // 计算经纬度范围（粗略范围过滤）
-        const latRange = rad / 111320; // 1度纬度约111.32km
-        const lngRange = rad / (111320 * Math.cos(lat * Math.PI / 180));
-
-        // 查询数据库
-        const restaurants = await Restaurant.findAndCountAll({
-            where: {
-                latitude: {
-                    [Op.between]: [lat - latRange, lat + latRange]
-                },
-                longitude: {
-                    [Op.between]: [lng - lngRange, lng + lngRange]
-                }
-            },
-            offset: (pg - 1) * size,
-            limit: size
-        });
+        // 使用模拟数据获取餐厅列表
+        const result = mockData.getRestaurants(lat, lng, rad, pg, size);
 
         // 计算实际距离并过滤
-        const filteredRestaurants = restaurants.rows
+        const filteredRestaurants = result.data.restaurants
             .map(restaurant => {
                 const distance = calculateDistance(
                     lat, lng,
-                    restaurant.latitude,
-                    restaurant.longitude
+                    restaurant.location.latitude,
+                    restaurant.location.longitude
                 );
                 return {
-                    ...restaurant.toJSON(),
+                    ...restaurant,
                     distance: Math.round(distance)
                 };
             })
@@ -97,8 +81,8 @@ router.get('/', async (req, res) => {
                     name: restaurant.name,
                     address: restaurant.address,
                     location: {
-                        latitude: restaurant.latitude,
-                        longitude: restaurant.longitude
+                        latitude: restaurant.location.latitude,
+                        longitude: restaurant.location.longitude
                     },
                     categories: restaurant.categories,
                     rating: restaurant.rating,
