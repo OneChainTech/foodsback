@@ -202,32 +202,70 @@ node src/utils/generateToken.js
 export TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJ0ZXN0LXVzZXItMSIsImVtYWlsIjoidGVzdEBleGFtcGxlLmNvbSIsImlhdCI6MTczMzc5MjUzOCwiZXhwIjoxNzMzODc4OTM4fQ.uorUSshDCaAvh5iHCTd_YUwjXab16zaxWjTmtybsZ5g"
 
 
-服务器ip
+服务器ip 43.138.23.201 
 
 # 1. 获取餐厅列表接口
-curl -X GET "http://localhost:8080/api/v1/restaurants?latitude=37.7749&longitude=-122.4194&radius=3000&page=1&pageSize=20" \
+curl -X GET \
+"http://localhost:8080/api/v1/restaurants?\
+latitude=31.2304&\
+longitude=121.4737&\
+radius=3000&\
+page=1&\
+pageSize=20" \
 -H "Authorization: Bearer $TOKEN" \
 -H "Content-Type: application/json"
 
 # 2. 开始匹配用户接口
-curl -X POST "http://localhost:8080/api/v1/matching/start" \
+# 首先获取一个真实的餐厅ID和用户ID（从数据库中的测试数据）
+curl -X POST \
+"http://localhost:8080/api/v1/matching/start" \
 -H "Authorization: Bearer $TOKEN" \
 -H "Content-Type: application/json" \
 -d '{
-  "restaurantId": "rest1",
-  "userId": "user1",
-  "diningTime": "2024-12-09T20:00:00Z",
-  "preferences": {
-    "gender": "any",
-    "ageRange": {
-      "min": 20,
-      "max": 40
+    "restaurantId": "替换为真实的餐厅ID",
+    "userId": "替换为真实的用户ID",
+    "diningTime": "2024-12-10T14:00:00Z",
+    "preferences": {
+        "gender": "any",
+        "ageRange": {
+            "min": 20,
+            "max": 40
+        }
     }
-  }
 }'
 
 # 3. 查询最新匹配用户接口
-curl -X GET "http://localhost:8080/api/v1/matching/users?restaurantId=rest1&userId=user1&lastUpdateTime=2024-12-09T09:00:00Z" \
+curl -X GET \
+"http://localhost:8080/api/v1/matching/users?\
+restaurantId=替换为真实的餐厅ID&\
+userId=替换为真实的用户ID&\
+lastUpdateTime=2024-12-10T02:00:00Z" \
 -H "Authorization: Bearer $TOKEN" \
 -H "Content-Type: application/json"
 
+# 4. WebSocket 聊天连接测试 (使用 wscat 工具)
+
+# 安装 wscat（如果还没安装）
+npm install -g wscat
+
+# 连接 WebSocket
+wscat -c "ws://localhost:8080/ws/chat?token=$TOKEN&chatId=test-chat-1"
+
+# 连接成功后，可以发送消息（在 wscat 终端中输入）：
+{
+    "type": "message",
+    "data": {
+        "chatId": "test-chat-1",
+        "receiverId": "替换为接收者的用户ID",
+        "content": "你好！要一起吃饭吗？",
+        "contentType": "text",
+        "timestamp": "2024-12-10T02:06:18Z"
+    }
+}
+
+
+# 查看第一个餐厅的ID
+curl -X GET \
+"http://localhost:8080/api/v1/restaurants?latitude=31.2304&longitude=121.4737&radius=5000&page=1&pageSize=1" \
+-H "Authorization: Bearer $TOKEN" \
+-H "Content-Type: application/json"
